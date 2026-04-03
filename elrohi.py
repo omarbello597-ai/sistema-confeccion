@@ -70,13 +70,18 @@ if st.button("Ingresar"):
 
                 cantidad = st.number_input("🔢 Cantidad realizada", min_value=0, step=1)
 
-                # 🔥 GUARDAR PRODUCCIÓN + CONTROL INVENTARIO
+                # 🔥 GUARDAR PRODUCCIÓN + CONTROL MULTIUSUARIO
                 if st.button("Guardar producción"):
+
+                    # 🔥 CONSULTA EN TIEMPO REAL
+                    lote_actual = db.collection("lotes").document(lote_doc.id).get().to_dict()
+                    disponible_actual = lote_actual.get("tallas", {}).get(talla, 0)
+
                     if cantidad <= 0:
                         st.error("Ingrese una cantidad válida")
 
-                    elif cantidad > disponible:
-                        st.error("❌ No puedes registrar más de lo disponible")
+                    elif cantidad > disponible_actual:
+                        st.error(f"❌ Solo hay {disponible_actual} disponibles actualmente")
 
                     else:
                         # Guardar producción
@@ -90,8 +95,8 @@ if st.button("Ingresar"):
                             "timestamp": firestore.SERVER_TIMESTAMP
                         })
 
-                        # 🔥 ACTUALIZAR INVENTARIO
-                        nuevo_valor = disponible - cantidad
+                        # 🔥 ACTUALIZAR INVENTARIO REAL
+                        nuevo_valor = disponible_actual - cantidad
 
                         db.collection("lotes").document(lote_doc.id).update({
                             f"tallas.{talla}": nuevo_valor
