@@ -44,7 +44,7 @@ if st.button("Ingresar"):
 
             satelite = usuario_encontrado.get("satelite")
 
-            # 🔥 FILTRO POR SATÉLITE + ESTADO
+            # 🔥 FILTRO CORRECTO
             lotes_ref = db.collection("lotes") \
                 .where("satelite", "==", satelite) \
                 .where("estado", "==", "en_produccion") \
@@ -75,56 +75,74 @@ if st.button("Ingresar"):
 
                 cantidad = st.number_input("🔢 Cantidad realizada", min_value=0, step=1)
 
-                # 🔥 TRANSACCIÓN (CONTROL REAL)
+                # =========================
+                # 🔥 BLOQUE CRÍTICO (TRANSACCIÓN REAL)
+                # =========================
                 if st.button("Guardar producción"):
+
+                    try:
+                        cantidad_int = int(cantidad)
+                    except:
+                        st.error("Cantidad inválida")
+                        st.stop()
+
+                    if cantidad_int <= 0:
+                        st.error("Ingrese una cantidad válida")
+                        st.stop()
 
                     lote_ref = db.collection("lotes").document(lote_doc.id)
 
+                    transaction = db.transaction()
+
                     @firestore.transactional
-                    def actualizar_lote(transaction, lote_ref):
+                    def proceso(transaction):
 
                         snapshot = lote_ref.get(transaction=transaction)
-                        lote_data = snapshot.to_dict()
+                        data = snapshot.to_dict()
 
-                        disponible_actual = lote_data.get("tallas", {}).get(talla, 0)
+                        if not data:
+                            raise Exception("Lote no encontrado")
 
-                        if cantidad <= 0:
-                            return "error_cantidad"
+                        disponible_actual = data.get("tallas", {}).get(talla, 0)
 
-                        if cantidad > disponible_actual:
-                            return f"error_stock_{disponible_actual}"
+                        # 🔥 VALIDACIÓN REAL
+                        if cantidad_int > disponible_actual:
+                            raise Exception(f"STOCK:{disponible_actual}")
 
-                        nuevo_valor = disponible_actual - cantidad
+                        nuevo_valor = disponible_actual - cantidad_int
 
+                        # 🔥 UPDATE ATÓMICO
                         transaction.update(lote_ref, {
                             f"tallas.{talla}": nuevo_valor
                         })
 
-                        return "ok"
+                        return disponible_actual
 
-                    transaction = db.transaction()
-                    resultado = actualizar_lote(transaction, lote_ref)
+                    try:
+                        disponible_antes = proceso(transaction)
 
-                    if resultado == "error_cantidad":
-                        st.error("Ingrese una cantidad válida")
-
-                    elif "error_stock" in resultado:
-                        disponible_actual = resultado.split("_")[-1]
-                        st.error(f"❌ Solo hay {disponible_actual} disponibles actualmente")
-
-                    else:
+                        # 🔥 SOLO GUARDA SI TODO FUE OK
                         db.collection("produccion").add({
                             "codigo": codigo,
                             "operario": usuario_encontrado.get("nombre"),
                             "lote_id": lote_seleccionado,
                             "operacion": operacion,
-                            "cantidad": cantidad,
+                            "cantidad": cantidad_int,
                             "talla": talla,
                             "timestamp": firestore.SERVER_TIMESTAMP
                         })
 
-                        st.success("✅ Producción registrada correctamente")
+                        st.success(f"✅ OK | Antes: {disponible_antes} → Ahora: {disponible_antes - cantidad_int}")
                         st.rerun()
+
+                    except Exception as e:
+                        msg = str(e)
+
+                        if "STOCK" in msg:
+                            disponible_actual = msg.split(":")[1]
+                            st.error(f"❌ Solo hay {disponible_actual} disponibles")
+                        else:
+                            st.error(f"Error: {msg}")
 
         # =========================
         # 📊 SUPERVISOR
