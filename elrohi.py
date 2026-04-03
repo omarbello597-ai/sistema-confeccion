@@ -44,11 +44,16 @@ if st.button("Ingresar"):
 
             satelite = usuario_encontrado.get("satelite")
 
-            lotes_ref = db.collection("lotes").where("satelite", "==", satelite).stream()
+            # 🔥 FILTRO POR SATÉLITE + ESTADO
+            lotes_ref = db.collection("lotes") \
+                .where("satelite", "==", satelite) \
+                .where("estado", "==", "en_produccion") \
+                .stream()
+
             lotes = list(lotes_ref)
 
             if len(lotes) == 0:
-                st.warning("No hay lotes disponibles para tu satélite")
+                st.warning("No hay lotes en producción para tu satélite")
             else:
                 lote_dict = {lote.to_dict().get("lote_id"): lote for lote in lotes}
 
@@ -70,7 +75,7 @@ if st.button("Ingresar"):
 
                 cantidad = st.number_input("🔢 Cantidad realizada", min_value=0, step=1)
 
-                # 🔥 GUARDAR PRODUCCIÓN CON TRANSACCIÓN
+                # 🔥 TRANSACCIÓN (CONTROL REAL)
                 if st.button("Guardar producción"):
 
                     lote_ref = db.collection("lotes").document(lote_doc.id)
@@ -89,10 +94,8 @@ if st.button("Ingresar"):
                         if cantidad > disponible_actual:
                             return f"error_stock_{disponible_actual}"
 
-                        # 🔥 Nuevo valor
                         nuevo_valor = disponible_actual - cantidad
 
-                        # 🔥 Update seguro
                         transaction.update(lote_ref, {
                             f"tallas.{talla}": nuevo_valor
                         })
@@ -102,7 +105,6 @@ if st.button("Ingresar"):
                     transaction = db.transaction()
                     resultado = actualizar_lote(transaction, lote_ref)
 
-                    # 🔍 RESPUESTA
                     if resultado == "error_cantidad":
                         st.error("Ingrese una cantidad válida")
 
@@ -111,7 +113,6 @@ if st.button("Ingresar"):
                         st.error(f"❌ Solo hay {disponible_actual} disponibles actualmente")
 
                     else:
-                        # 🔥 Guardar producción SOLO si pasó la transacción
                         db.collection("produccion").add({
                             "codigo": codigo,
                             "operario": usuario_encontrado.get("nombre"),
