@@ -4,7 +4,7 @@ from firebase_admin import credentials, firestore
 import json
 import os
 
-# 🔥 Firebase desde entorno (Render)
+# 🔥 Firebase
 if not firebase_admin._apps:
     firebase_dict = json.loads(os.environ["FIREBASE_KEY"])
     cred = credentials.Certificate(firebase_dict)
@@ -35,16 +35,14 @@ if st.button("Ingresar"):
         rol = usuario_encontrado.get("rol")
 
         # =========================
-        # 🔧 MÓDULO OPERARIO
+        # 🔧 OPERARIO
         # =========================
         if rol == "operario":
 
-            st.write(f"Rol: {rol}")
             st.header("🔧 Módulo Operario")
 
             satelite = usuario_encontrado.get("satelite")
 
-            # 🔥 FILTRO CORRECTO
             lotes_ref = db.collection("lotes") \
                 .where("satelite", "==", satelite) \
                 .where("estado", "==", "en_produccion") \
@@ -73,25 +71,11 @@ if st.button("Ingresar"):
 
                 operacion = st.selectbox("🧵 Seleccione operación", operaciones)
 
-                cantidad = st.number_input("🔢 Cantidad realizada", min_value=0, step=1)
+                cantidad = int(st.number_input("🔢 Cantidad realizada", min_value=0, step=1))
 
-                # =========================
-                # 🔥 BLOQUE CRÍTICO (TRANSACCIÓN REAL)
-                # =========================
                 if st.button("Guardar producción"):
 
-                    try:
-                        cantidad_int = int(cantidad)
-                    except:
-                        st.error("Cantidad inválida")
-                        st.stop()
-
-                    if cantidad_int <= 0:
-                        st.error("Ingrese una cantidad válida")
-                        st.stop()
-
                     lote_ref = db.collection("lotes").document(lote_doc.id)
-
                     transaction = db.transaction()
 
                     @firestore.transactional
@@ -100,18 +84,16 @@ if st.button("Ingresar"):
                         snapshot = lote_ref.get(transaction=transaction)
                         data = snapshot.to_dict()
 
-                        if not data:
-                            raise Exception("Lote no encontrado")
-
                         disponible_actual = data.get("tallas", {}).get(talla, 0)
 
-                        # 🔥 VALIDACIÓN REAL
-                        if cantidad_int > disponible_actual:
+                        if cantidad <= 0:
+                            raise Exception("Cantidad inválida")
+
+                        if cantidad > disponible_actual:
                             raise Exception(f"STOCK:{disponible_actual}")
 
-                        nuevo_valor = disponible_actual - cantidad_int
+                        nuevo_valor = disponible_actual - cantidad
 
-                        # 🔥 UPDATE ATÓMICO
                         transaction.update(lote_ref, {
                             f"tallas.{talla}": nuevo_valor
                         })
@@ -121,18 +103,17 @@ if st.button("Ingresar"):
                     try:
                         disponible_antes = proceso(transaction)
 
-                        # 🔥 SOLO GUARDA SI TODO FUE OK
                         db.collection("produccion").add({
                             "codigo": codigo,
                             "operario": usuario_encontrado.get("nombre"),
                             "lote_id": lote_seleccionado,
                             "operacion": operacion,
-                            "cantidad": cantidad_int,
+                            "cantidad": cantidad,
                             "talla": talla,
                             "timestamp": firestore.SERVER_TIMESTAMP
                         })
 
-                        st.success(f"✅ OK | Antes: {disponible_antes} → Ahora: {disponible_antes - cantidad_int}")
+                        st.success(f"✅ OK | Antes: {disponible_antes} → Ahora: {disponible_antes - cantidad}")
                         st.rerun()
 
                     except Exception as e:
@@ -142,13 +123,46 @@ if st.button("Ingresar"):
                             disponible_actual = msg.split(":")[1]
                             st.error(f"❌ Solo hay {disponible_actual} disponibles")
                         else:
-                            st.error(f"Error: {msg}")
+                            st.error(msg)
 
         # =========================
-        # 📊 SUPERVISOR
+        # 👷 SUPERVISOR
         # =========================
         elif rol == "supervisor":
-            st.header("📊 Módulo Supervisor")
+
+            st.header("👷 Módulo Supervisor")
+
+            lotes_ref = db.collection("lotes").stream()
+            lotes = list(lotes_ref)
+
+            if len(lotes) == 0:
+                st.warning("No hay lotes creados")
+            else:
+                lote_dict = {lote.to_dict().get("lote_id"): lote for lote in lotes}
+
+                lote_seleccionado = st.selectbox("📦 Seleccione lote", list(lote_dict.keys()))
+                lote_doc = lote_dict[lote_seleccionado]
+
+                st.write(f"📦 Lote seleccionado: {lote_seleccionado}")
+
+                # 🔥 Lista de satélites (puedes luego mover esto a Firebase)
+                satelites = [
+                    "Satelite Norte",
+                    "Satelite Sur",
+                    "Satelite Centro"
+                ]
+
+                satelite_asignado = st.selectbox("🏭 Enviar a producción a:", satelites)
+
+                if st.button("🚀 Enviar a producción"):
+
+                    db.collection("lotes").document(lote_doc.id).update({
+                        "estado": "en_produccion",
+                        "satelite": satelite_asignado
+                    })
+
+                    st.success(f"✅ Lote enviado a {satelite_asignado}")
+                    st.rerun()
 
         # =========================
         # 📈 GERENTE
