@@ -70,21 +70,48 @@ if st.button("Ingresar"):
 
                 cantidad = st.number_input("🔢 Cantidad realizada", min_value=0, step=1)
 
-                # 🔥 GUARDAR PRODUCCIÓN + CONTROL MULTIUSUARIO
+                # 🔥 GUARDAR PRODUCCIÓN CON TRANSACCIÓN
                 if st.button("Guardar producción"):
 
-                    # 🔥 CONSULTA EN TIEMPO REAL
-                    lote_actual = db.collection("lotes").document(lote_doc.id).get().to_dict()
-                    disponible_actual = lote_actual.get("tallas", {}).get(talla, 0)
+                    lote_ref = db.collection("lotes").document(lote_doc.id)
 
-                    if cantidad <= 0:
+                    @firestore.transactional
+                    def actualizar_lote(transaction, lote_ref):
+
+                        snapshot = lote_ref.get(transaction=transaction)
+                        lote_data = snapshot.to_dict()
+
+                        disponible_actual = lote_data.get("tallas", {}).get(talla, 0)
+
+                        if cantidad <= 0:
+                            return "error_cantidad"
+
+                        if cantidad > disponible_actual:
+                            return f"error_stock_{disponible_actual}"
+
+                        # 🔥 Nuevo valor
+                        nuevo_valor = disponible_actual - cantidad
+
+                        # 🔥 Update seguro
+                        transaction.update(lote_ref, {
+                            f"tallas.{talla}": nuevo_valor
+                        })
+
+                        return "ok"
+
+                    transaction = db.transaction()
+                    resultado = actualizar_lote(transaction, lote_ref)
+
+                    # 🔍 RESPUESTA
+                    if resultado == "error_cantidad":
                         st.error("Ingrese una cantidad válida")
 
-                    elif cantidad > disponible_actual:
+                    elif "error_stock" in resultado:
+                        disponible_actual = resultado.split("_")[-1]
                         st.error(f"❌ Solo hay {disponible_actual} disponibles actualmente")
 
                     else:
-                        # Guardar producción
+                        # 🔥 Guardar producción SOLO si pasó la transacción
                         db.collection("produccion").add({
                             "codigo": codigo,
                             "operario": usuario_encontrado.get("nombre"),
@@ -95,14 +122,7 @@ if st.button("Ingresar"):
                             "timestamp": firestore.SERVER_TIMESTAMP
                         })
 
-                        # 🔥 ACTUALIZAR INVENTARIO REAL
-                        nuevo_valor = disponible_actual - cantidad
-
-                        db.collection("lotes").document(lote_doc.id).update({
-                            f"tallas.{talla}": nuevo_valor
-                        })
-
-                        st.success("✅ Producción guardada correctamente")
+                        st.success("✅ Producción registrada correctamente")
                         st.rerun()
 
         # =========================
